@@ -1,0 +1,110 @@
+steps:
+  # ============================================================
+  # Step 1: Detect which services changed
+  # ============================================================
+  - name: 'gcr.io/cloud-builders/git'
+    id: 'detect-changes'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        git diff --name-only HEAD~1 HEAD > /workspace/changed_files.txt
+        echo "Changed files:"
+        cat /workspace/changed_files.txt
+
+  # ============================================================
+  # Step 2: Build and test Work Graph Service (if changed)
+  # ============================================================
+  - name: 'golang:1.22'
+    id: 'test-work-graph'
+    dir: 'services/work-graph-service'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if grep -q "services/work-graph-service" /workspace/changed_files.txt; then
+          echo "Running tests for work-graph-service..."
+          go test -race ./...
+        else
+          echo "No changes in work-graph-service, skipping."
+        fi
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-work-graph'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGISTRY}/work-graph-service:${SHORT_SHA}'
+      - '-t'
+      - '${_REGISTRY}/work-graph-service:latest'
+      - 'services/work-graph-service'
+
+  # ============================================================
+  # Step 3: Build and test AI Gateway (if changed)
+  # ============================================================
+  - name: 'python:3.12'
+    id: 'test-ai-gateway'
+    dir: 'services/ai-gateway'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if grep -q "services/ai-gateway" /workspace/changed_files.txt; then
+          pip install -r requirements.txt -q
+          pytest -v
+        else
+          echo "No changes in ai-gateway, skipping."
+        fi
+
+  # ============================================================
+  # Step 4: Build and lint Web Client (if changed)
+  # ============================================================
+  - name: 'node:20'
+    id: 'test-web'
+    dir: 'web'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if grep -q "web/" /workspace/changed_files.txt; then
+          npm ci
+          npm run lint
+          npm run test -- --run
+          npx axe-core-cli --exit  # Accessibility lint
+        else
+          echo "No changes in web, skipping."
+        fi
+
+  # ============================================================
+  # Step 5: Push images to Artifact Registry
+  # ============================================================
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-images'
+    args: ['push', '--all-tags', '${_REGISTRY}/work-graph-service']
+
+  # ============================================================
+  # Step 6: Deploy to GKE (canary then full)
+  # ============================================================
+  - name: 'gcr.io/cloud-builders/kubectl'
+    id: 'deploy-canary'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/work-graph-service'
+      - 'work-graph-service=${_REGISTRY}/work-graph-service:${SHORT_SHA}'
+      - '--namespace=synergy'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=synergy-cluster'
+
+substitutions:
+  _REGISTRY: 'us-central1-docker.pkg.dev/${PROJECT_ID}/synergy-images'
+  _REGION: 'us-central1'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+images:
+  - '${_REGISTRY}/work-graph-service:${SHORT_SHA}'
+  - '${_REGISTRY}/work-graph-service:latest'

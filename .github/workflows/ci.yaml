@@ -1,0 +1,97 @@
+name: CI — Pull Request Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      work-graph: ${{ steps.filter.outputs.work-graph }}
+      ai-gateway: ${{ steps.filter.outputs.ai-gateway }}
+      web: ${{ steps.filter.outputs.web }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            work-graph:
+              - 'services/work-graph-service/**'
+            ai-gateway:
+              - 'services/ai-gateway/**'
+            web:
+              - 'web/**'
+            infra:
+              - 'infra/**'
+
+  test-go-services:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.work-graph == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Test work-graph-service
+        working-directory: services/work-graph-service
+        run: go test -race -v ./...
+
+  test-ai-gateway:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ai-gateway == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install and test
+        working-directory: services/ai-gateway
+        run: |
+          pip install -r requirements.txt
+          pytest -v
+
+  test-web:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Install, lint, test
+        working-directory: web
+        run: |
+          npm ci
+          npm run lint
+          npm run test -- --run
+      - name: Accessibility check
+        working-directory: web
+        run: npx axe-core-cli --exit || echo "::warning::Accessibility issues found"
+
+  validate-terraform:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.8'
+      - name: Terraform validate
+        working-directory: infra/terraform
+        run: |
+          terraform init -backend=false
+          terraform validate
+          terraform fmt -check

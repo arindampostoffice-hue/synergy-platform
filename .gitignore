@@ -1,0 +1,54 @@
+# ===== Dependencies =====
+node_modules/
+vendor/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ===== Build outputs =====
+dist/
+build/
+*.exe
+*.out
+bin/
+
+# ===== Terraform (NEVER COMMIT STATE) =====
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
+
+# ===== Secrets and credentials =====
+.env
+.env.*
+*.pem
+*.key
+*.p12
+service-account*.json
+credentials*.json
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Docker =====
+docker-compose.override.yml
+
+# ===== Coverage =====
+coverage/
+*.cover
+*.coverage
+htmlcov/
